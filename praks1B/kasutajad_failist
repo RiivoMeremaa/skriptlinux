@@ -1,0 +1,31 @@
+#! /bin/bash
+# kasutajad_failist - lisab kõvakodeeritud kasutajad
+# Kasutus: ./kasutajad_failist
+# NB! Faili lugemine on eemaldatud, kasutajanimed on skriptis
+
+set -euo pipefail
+
+# Otsime lisa_kasutaja skripti täidetavat faili samast kataloogist, või $PATH-st
+LISA_SCRIPT="./lisa_kasutaja"
+if [ ! -x "$LISA_SCRIPT" ]; then
+  # Võib proovida otsida PATH-st
+  LISA_SCRIPT_PATH="$(command -v lisa_kasutaja || true)"
+  if [ -z "$LISA_SCRIPT_PATH" ] || [ ! -x "$LISA_SCRIPT_PATH" ]; then
+    echo "Viga: skripti 'lisa_kasutaja' ei leitud ega pole täidetav." >&2
+    exit 1
+  else
+    LISA_SCRIPT="$LISA_SCRIPT_PATH"
+  fi
+fi
+
+# Kõvakodeeritud kasutajanimed
+kasutajad=("Kasutaja1" "Kasutaja2" "Kasutaja3")
+
+for kasutaja in "${kasutajad[@]}"; do
+  echo "Lisame kasutaja: $kasutaja"
+
+  # Käivitame lisa_kasutaja ja jätkame ka vigade korral
+  if ! "$LISA_SCRIPT" "$kasutaja"; then
+    echo "Hoiatus: kasutaja '$kasutaja' lisamine ebaõnnestus." >&2
+  fi
+done
