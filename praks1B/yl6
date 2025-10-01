@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Kontrolli, kas skripti käivitab root
+if [ "$(whoami)" != "root" ]; then
+    echo "Seda skripti saab käivitada ainult root kasutaja!"
+    exit 1
+fi
+
+# Küsi, mitu kasutajat soovitakse lisada
+read -p "Mitu kasutajat soovid lisada? " kogus
+
+# Tsükkel iga kasutaja jaoks
+for ((i=1; i<=kogus; i++)); do
+    echo "Sisesta kasutajanimi kasutajale #$i:"
+    read kasutaja
+
+    echo "Sisesta parool kasutajale '$kasutaja':"
+    read -s parool
+
+    # Lisa kasutaja
+    useradd "$kasutaja"
+
+    # Määra parool
+    echo "$kasutaja:$parool" | chpasswd
+
+    echo "Kasutaja '$kasutaja' on lisatud."
+done
+
+echo "Kõik kasutajad on edukalt lisatud."
