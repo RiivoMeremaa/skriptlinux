@@ -1,0 +1,72 @@
+#! /bin/bash
+# lisa_kasutaja - loob kasutaja ja seab parooliks 'qwerty' või käsurealt antud parooli
+# Kasutus: ./lisa_kasutaja kasutajanimi [parool]
+# Kui paroolit ei anta, siis kasutatakse vaikimisi 'qwerty'
+
+set -euo pipefail
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Skript vajab root õigusi, proovin käivitada sudo alt..."
+  exec sudo "$0" "$@"
+fi
+
+if [ "$#" -lt 1 ]; then
+  echo "Kasutus: $0 kasutajanimi [parool]"
+  exit 1
+fi
+
+USER="$1"
+PASS="${2:-qwerty}"
+
+# Kontroll, kas kasutaja juba eksisteerib
+if id "$USER" >/dev/null 2>&1; then
+  echo "Kasutaja '$USER' juba eksisteerib."
+else
+  # Loo kasutaja koos kodukataloogiga
+  useradd -m -s /bin/bash -c "" "$USER"
+  echo "Kasutaja '$USER' loodud."
+fi
+
+# Sea parool
+echo "$USER:$PASS" | chpasswd
+echo "Parool kasutajale '$USER' on seatud."
+
+# Kontroll kodukataloogi õiguste üle
+HOME_DIR="/home/$USER"
+if [ ! -d "$HOME_DIR" ]; then
+  echo "Kodukataloogi $HOME_DIR ei leitud, luuakse..."
+  mkdir -p "$HOME_DIR"
+fi
+chown "$USER":"$USER" "$HOME_DIR"
+chmod 700 "$HOME_DIR"
+
+# Kontrollime, kas kodukataloogis on vajalikud peidetud failid
+# Kui neid pole, siis lisame standardsed .bashrc, .profile jne (võid lisada veel)
+if [ ! -f "$HOME_DIR/.bashrc" ]; then
+  cp /etc/skel/.bashrc "$HOME_DIR/"
+  chown "$USER":"$USER" "$HOME_DIR/.bashrc"
+fi
+if [ ! -f "$HOME_DIR/.profile" ]; then
+  cp /etc/skel/.profile "$HOME_DIR/"
+  chown "$USER":"$USER" "$HOME_DIR/.profile"
+fi
+if [ ! -f "$HOME_DIR/.bash_logout" ]; then
+  cp /etc/skel/.bash_logout "$HOME_DIR/"
+  chown "$USER":"$USER" "$HOME_DIR/.bash_logout"
+fi
+
+# Kuvame kokkuvõtte
+echo
+echo "Reakontroll (/etc/passwd):"
+grep "^${USER}:" /etc/passwd || true
+echo
+echo "Shadow-kirje (/etc/shadow):"
+grep "^${USER}:" /etc/shadow || true
+echo
+echo "Grupp (/etc/group):"
+grep "^${USER}:" /etc/group || true
+echo
+echo "Kodukataloogi sisu ($HOME_DIR):"
+ls -la "$HOME_DIR" || true
+echo
+echo "Kasutaja '$USER' on loodud parooliga '$PASS'."
