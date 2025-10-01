@@ -1,0 +1,87 @@
+#! /bin/bash
+# kasutajad_failist_parooliga - lisab kasutajad ja paroolid failist
+# Kasutus: ./kasutajad_failist_parooliga failinimi
+
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Kasutus: $0 kasutajaparoolide_fail"
+  exit 2
+fi
+
+FAIL="$1"
+
+if [ ! -f "$FAIL" ]; then
+  echo "Viga: fail '$FAIL' ei eksisteeri." >&2
+  exit 1
+fi
+
+# Kontroll, et skripti käivitab root
+if [ "$EUID" -ne 0 ]; then
+  echo "Skript vajab root õigusi, proovin käivitada sudo alt..."
+  exec sudo "$0" "$@"
+fi
+
+# Funktsioon kasutaja lisamiseks koos parooliga
+lisa_kasutaja_parooliga() {
+  local kasutaja="$1"
+  local parool="$2"
+
+  if id "$kasutaja" >/dev/null 2>&1; then
+    echo "Kasutaja '$kasutaja' juba eksisteerib."
+  else
+    useradd -m -s /bin/bash "$kasutaja"
+    echo "Kasutaja '$kasutaja' loodud."
+  fi
+
+  echo "$kasutaja:$parool" | chpasswd
+  echo "Parool kasutajale '$kasutaja' on seatud."
+
+  # Kontroll kodukataloogi õiguste üle
+  HOME_DIR="/home/$kasutaja"
+  if [ ! -d "$HOME_DIR" ]; then
+    mkdir -p "$HOME_DIR"
+    chown "$kasutaja":"$kasutaja" "$HOME_DIR"
+    chmod 700 "$HOME_DIR"
+  fi
+
+  echo
+  echo "Reakontroll (/etc/passwd):"
+  grep "^${kasutaja}:" /etc/passwd || true
+  echo
+  echo "Shadow-kirje (/etc/shadow):"
+  grep "^${kasutaja}:" /etc/shadow || true
+  echo
+  echo "Grupp (/etc/group):"
+  grep "^${kasutaja}:" /etc/group || true
+  echo
+  echo "Kodukataloogi sisu ($HOME_DIR):"
+  ls -la "$HOME_DIR" || true
+  echo
+}
+
+# Loeme faili read
+while IFS= read -r rida || [ -n "$rida" ]; do
+  # Eemalda tühikud
+  rida="$(echo "$rida" | tr -d '\r\n ')"
+
+  # Tühi rida vahele jätta
+  if [ -z "$rida" ]; then
+    continue
+  fi
+
+  # Eralda kasutajanimi ja parool
+  kasutaja="${rida%%:*}"
+  parool="${rida#*:}"
+
+  if [ -z "$kasutaja" ] || [ -z "$parool" ] || [ "$kasutaja" = "$parool" ]; then
+    echo "Viga: vale formaat read failis: '$rida' (oodatud kasutajanimi:parool)"
+    continue
+  fi
+
+  echo "Lisame kasutaja: $kasutaja koos parooliga."
+
+  # Lisa kasutaja parooliga
+  lisa_kasutaja_parooliga "$kasutaja" "$parool"
+
+done < "$FAIL"
