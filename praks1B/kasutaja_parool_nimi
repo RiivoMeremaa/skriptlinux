@@ -1,0 +1,161 @@
+#! /bin/bash
+# kasutajad_eraldatud.sh
+# Kasutus: ./kasutajad_eraldatud.sh kasutajad_fail paroolid_fail
+# Igas failis üks rida vastab ühele kasutajale; read on paaris järjekorras:
+# faili1_rida1 <-> faili2_rida1, faili1_rida2 <-> faili2_rida2 jne.
+# Skript teeb kõik vajalikud operaatoritoimingud (ei kutsu väliseid skripte).
+
+set -euo pipefail
+
+usage() {
+  echo "Kasutus: $0 kasutajad_fail paroolid_fail"
+  exit 2
+}
+
+if [ "$#" -ne 2 ]; then
+  usage
+fi
+
+USERS_FILE="$1"
+PW_FILE="$2"
+
+if [ ! -f "$USERS_FILE" ]; then
+  echo "Viga: fail '$USERS_FILE' ei leidu." >&2
+  exit 1
+fi
+
+if [ ! -f "$PW_FILE" ]; then
+  echo "Viga: fail '$PW_FILE' ei leidu." >&2
+  exit 1
+fi
+
+# kui pole root, proovi taaskäivitada sudo alt
+if [ "$EUID" -ne 0 ]; then
+  echo "Skript vajab root õigusi, taaskäivitamine sudo alt..."
+  exec sudo "$0" "$@"
+fi
+
+# abifunktsioon: trim (eemalda \r ja tühikud algusest/lõpust)
+trim() {
+  # kasutame sed/printf — piisavalt universaalne
+  local v
+  v="$(printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  printf '%s' "$v"
+}
+
+# avame mõlema faili fd-dega
+exec 3<"$USERS_FILE"
+exec 4<"$PW_FILE"
+
+line_no=0
+errors=0
+
+while true; do
+  line_no=$((line_no+1))
+
+  # loeme ühe rea mõlemast failist
+  if ! IFS= read -r raw_user <&3; then user_eof=1; else user_eof=0; fi
+  if ! IFS= read -r raw_pass <&4; then pass_eof=1; else pass_eof=0; fi
+
+  # kui mõlemad EOF -> lõpetame
+  if [ "$user_eof" -eq 1 ] && [ "$pass_eof" -eq 1 ]; then
+    break
+  fi
+
+  # kui EOF on vaid ühel -> veateade ja väljumine
+  if [ "$user_eof" -ne "$pass_eof" ]; then
+    echo "Viga: failide read ei ole sama pikkusega (erinev ridade arv). Lõppkasutuseni loend: rida $line_no." >&2
+    errors=$((errors+1))
+    break
+  fi
+
+  # trimmi read
+  user="$(trim "$raw_user")"
+  pass="$(trim "$raw_pass")"
+
+  # ignoreeri tühje ja kommentaariread (kui kasutaja tühi, jätame vahele)
+  if [ -z "$user" ]; then
+    echo "Rida $line_no: tühi kasutajanimi — vahele jäetud."
+    continue
+  fi
+  if [ -z "$pass" ]; then
+    echo "Rida $line_no: kasutaja '$user' parool tühi — vahele jäetud." >&2
+    errors=$((errors+1))
+    continue
+  fi
+
+  # valida kasutajanimi (lubatud: a-z A-Z 0-9 . _ -)
+  if [[ ! "$user" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "Rida $line_no: vigane kasutajanimi '$user' — lubatud tähemärgid a-z A-Z 0-9 . _ -; jäetakse vahele." >&2
+    errors=$((errors+1))
+    continue
+  fi
+
+  echo "Rida $line_no: töötlen kasutajat '$user'..."
+
+  # Loo kasutaja kui puudub
+  if id "$user" >/dev/null 2>&1; then
+    echo "  Kasutaja '$user' juba eksisteerib — uuendan parooli ja kontrollin kodukataloogi."
+  else
+    useradd -m -s /bin/bash -c "" "$user" && echo "  Kasutaja '$user' loodud." || {
+      echo "  Viga: ei õnnestunud kasutajat '$user' luua." >&2
+      errors=$((errors+1))
+      continue
+    }
+  fi
+
+  # Sea parool (chpasswd loeb sisendit vormis user:pass)
+  if echo "${user}:${pass}" | chpasswd; then
+    echo "  Parool kasutajale '$user' seatud."
+  else
+    echo "  Viga: ei õnnestunud parooli seada kasutajale '$user'." >&2
+    errors=$((errors+1))
+  fi
+
+  # Kontroll ja seadistused kodukataloogis
+  HOME_DIR="/home/$user"
+  if [ ! -d "$HOME_DIR" ]; then
+    mkdir -p "$HOME_DIR"
+    echo "  Kodukataloogit ei eksisteerinud — loodud."
+  fi
+
+  chown "$user":"$user" "$HOME_DIR"
+  chmod 700 "$HOME_DIR"
+
+  # kopeeri /etc/skel failid (peidetud failid jm), kui neid kodus pole
+  if [ -d /etc/skel ]; then
+    for f in /etc/skel/.* /etc/skel/*; do
+      base="$(basename "$f")"
+      # väldi . ja ..
+      [ "$base" = "." ] && continue
+      [ "$base" = ".." ] && continue
+      # kui /etc/skel'i kirje olemas ja kodus pole, siis kopeeri
+      if [ -e "$f" ] && [ ! -e "$HOME_DIR/$base" ]; then
+        cp -a "$f" "$HOME_DIR/" || echo "  Hoiatus: ei saanud kopeerida $f -> $HOME_DIR/" >&2
+        chown -R "$user":"$user" "$HOME_DIR/$base" || true
+      fi
+    done
+  fi
+
+  # veidi kokkuvõtet rida kohta (shadow ja passwd rida)
+  echo "  Reakontroll (/etc/passwd):"
+  grep -E "^${user}:" /etc/passwd || true
+  echo "  Shadow-kirje (maskitud hash):"
+  awk -F: -v u="$user" 'BEGIN{OFS=":"} $1==u{ $2="***HASH***"; print }' /etc/shadow || true
+  echo "  Kodukataloogi sisu ($HOME_DIR):"
+  ls -la "$HOME_DIR" || true
+  echo
+done
+
+# sulgeme fd-d
+exec 3<&-
+exec 4<&-
+
+if [ "$errors" -ne 0 ]; then
+  echo "Skript lõpetas vigadega: $errors viga(d)." >&2
+  exit 1
+fi
+
+echo "Kõik read töödeldud edukalt."
+exit 0
+ 
