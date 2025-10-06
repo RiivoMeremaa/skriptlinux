@@ -7,14 +7,20 @@ BACKUP_FILE="$BACKUP_DIR/src_$DATE.tar.zst"
 
 mkdir -p "$BACKUP_DIR"
 
-# Rename all *.jpeg to *.jpg in SRC_DIR
 find "$SRC_DIR" -type f -iname '*.jpeg' | while read -r file; do
   newfile="${file%.*}.jpg"
   echo "Renaming '$file' to '$newfile'"
   mv "$file" "$newfile"
 done
 
-# Get absolute path of SRC_DIR
+if [ -f "$BACKUP_FILE" ]; then
+  read -p "Varukoopia fail '$BACKUP_FILE' juba olemas. Kas soovid üle kirjutada? (j/e): " answer
+  case "$answer" in
+    [jJ]* ) echo "Jätkan varukoopia loomist...";;
+    * ) echo "Varukoopia loomine katkestatud."; exit 0;;
+  esac
+fi
+
 SRC_DIR_ABS=$(realpath "$SRC_DIR")
 SRC_PARENT=$(dirname "$SRC_DIR_ABS")
 SRC_BASENAME=$(basename "$SRC_DIR_ABS")
@@ -22,7 +28,6 @@ SRC_BASENAME=$(basename "$SRC_DIR_ABS")
 echo "Backing up from: $SRC_DIR_ABS"
 echo "Backup will be saved to: $BACKUP_FILE"
 
-# Create the backup archive using zstd compression
 tar -I "zstd -19 -T0" -cf "$BACKUP_FILE" -C "$SRC_PARENT" "$SRC_BASENAME"
 
 if [ $? -eq 0 ]; then
