@@ -7,6 +7,13 @@ BACKUP_FILE="$BACKUP_DIR/src_$DATE.tar.zst"
 
 mkdir -p "$BACKUP_DIR"
 
+# Rename all *.jpeg to *.jpg in SRC_DIR
+find "$SRC_DIR" -type f -iname '*.jpeg' | while read -r file; do
+  newfile="${file%.*}.jpg"
+  echo "Renaming '$file' to '$newfile'"
+  mv "$file" "$newfile"
+done
+
 # Get absolute path of SRC_DIR
 SRC_DIR_ABS=$(realpath "$SRC_DIR")
 SRC_PARENT=$(dirname "$SRC_DIR_ABS")
